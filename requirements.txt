@@ -1,0 +1,27 @@
+# Core
+requests==2.31.0
+python-dotenv==1.0.0
+
+# Database
+# (sqlite3 is built-in)
+
+# LLM
+anthropic==0.49.0
+openai==1.68.2
+
+# TTS
+elevenlabs==1.54.0
+
+# Video / FFmpeg wrapper
+ffmpeg-python==0.2.0
+
+# YouTube upload
+google-api-python-client==2.163.0
+google-auth-httplib2==0.2.0
+google-auth-oauthlib==1.2.1
+
+# GUI (tkinter is built-in on Windows)
+# No extra deps needed for Tkinter
+
+# Utilities
+tqdm==4.67.1
