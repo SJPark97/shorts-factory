@@ -44,6 +44,9 @@ def load_queue_set() -> set:
         return {line.split("|")[0].strip() for line in f if line.strip()}
 
 
+HEADERS = {"User-Agent": "ShortsBot/1.0 (educational project; python-requests)"}
+
+
 def get_category_members(category: str, cmtype: str = "page|subcat") -> list[dict]:
     """Wikipedia API로 카테고리 멤버 가져오기"""
     members = []
@@ -56,7 +59,7 @@ def get_category_members(category: str, cmtype: str = "page|subcat") -> list[dic
         "format": "json",
     }
     while True:
-        resp = requests.get(WIKI_API, params=params, timeout=15)
+        resp = requests.get(WIKI_API, params=params, headers=HEADERS, timeout=15)
         resp.raise_for_status()
         data = resp.json()
         members.extend(data["query"]["categorymembers"])
@@ -108,7 +111,7 @@ def build_queue(categories: list[str] | None = None,
     if categories is None:
         categories = cfg["crawl"].get("categories", DEFAULT_CATEGORIES)
 
-    ROOT.joinpath("data").mkdir(parents=True, exist_ok=True)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     done_set = load_done_set()
     queue_set = load_queue_set()

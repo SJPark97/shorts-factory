@@ -1,0 +1,19 @@
+# 환경/의존성
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.spec
+build/
+dist/
+
+# 민감 정보 (API 키 포함)
+config.json
+
+# 데이터 및 결과물
+data/
+output/
+assets/
+
+# macOS
+.DS_Store

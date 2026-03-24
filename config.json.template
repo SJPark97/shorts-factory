@@ -1,0 +1,42 @@
+{
+  "api": {
+    "kling_api_key": "",
+    "kling_api_secret": "",
+    "llm_provider": "openai",
+    "llm_api_key": "",
+    "tts_provider": "openai",
+    "tts_api_key": "",
+    "youtube_credentials_path": "data/youtube_credentials.json"
+  },
+  "crawl": {
+    "categories": [
+      "History_by_period",
+      "Wars",
+      "Ancient_civilizations",
+      "Empires"
+    ],
+    "queue_refill_size": 100,
+    "recursion_depth": 3
+  },
+  "video": {
+    "target_duration_sec": 90,
+    "tts_voice": "alloy",
+    "tts_model": "tts-1-hd",
+    "elevenlabs_voice_id": "",
+    "kling_model": "kling-v1",
+    "kling_aspect_ratio": "9:16",
+    "kling_duration": 5
+  },
+  "upload": {
+    "daily_upload_limit": 3,
+    "privacy_status": "public",
+    "default_tags": [
+      "history",
+      "shorts",
+      "facts",
+      "historyfacts"
+    ],
+    "category_id": "27"
+  },
+  "channels": []
+}

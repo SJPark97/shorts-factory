@@ -138,7 +138,6 @@ def compose(script: dict, log=print) -> Path | None:
     script dict 기준으로 영상+음성+자막 합성 → 최종 mp4.
     반환값: 최종 파일 경로 (실패 시 None)
     """
-    sys.path.insert(0, str(ROOT))
     from storage import update_script
 
     video_path = Path(script["video_path"]) if script.get("video_path") else None
@@ -175,7 +174,6 @@ def compose(script: dict, log=print) -> Path | None:
 
 def run_compose_batch(n: int = None, log=print) -> int:
     """video_ready 스크립트 n개 합성. 반환값: 성공 수"""
-    sys.path.insert(0, str(ROOT))
     from storage import get_video_ready_scripts
     cfg = load_config()
     if n is None:

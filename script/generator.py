@@ -101,7 +101,6 @@ def generate_scripts(n: int = None, channel_id: str = "default",
     n=None 이면 config의 daily_upload_limit 사용.
     반환값: 생성된 대본 수
     """
-    sys.path.insert(0, str(ROOT))
     from storage import get_pending_sources, update_source_status, add_script
 
     cfg = load_config()

@@ -47,7 +47,6 @@ def generate_tts(script: dict, log=print) -> Path | None:
     script dict의 body를 TTS 변환 → mp3 저장.
     반환값: 저장된 파일 경로 (실패 시 None)
     """
-    sys.path.insert(0, str(ROOT))
     from storage import update_script
 
     cfg = load_config()
@@ -93,7 +92,6 @@ def generate_tts(script: dict, log=print) -> Path | None:
 
 def run_tts_batch(n: int = None, log=print) -> int:
     """pending 스크립트 n개를 TTS 변환. 반환값: 성공 수"""
-    sys.path.insert(0, str(ROOT))
     from storage import get_pending_scripts
     import json as _json
     cfg = load_config()

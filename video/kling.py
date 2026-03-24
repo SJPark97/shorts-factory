@@ -146,7 +146,6 @@ def generate_kling_video(script: dict, log=print) -> Path | None:
     스크립트 1개에 대해 Kling AI로 영상 생성 → 다운로드.
     반환값: 저장된 영상 경로 (실패 시 None)
     """
-    sys.path.insert(0, str(ROOT))
     from storage import update_script
 
     cfg = load_config()
@@ -177,7 +176,6 @@ def generate_kling_video(script: dict, log=print) -> Path | None:
 
 def run_kling_batch(n: int = None, log=print) -> int:
     """tts_done 스크립트 n개에 대해 Kling 영상 생성. 반환값: 성공 수"""
-    sys.path.insert(0, str(ROOT))
     from storage import get_tts_ready_scripts
     cfg = load_config()
     if n is None:

@@ -18,6 +18,7 @@ CONFIG_FILE = _CF
 
 WIKI_REST = "https://en.wikipedia.org/api/rest_v1/page/summary"
 WIKI_API = "https://en.wikipedia.org/w/api.php"
+HEADERS = {"User-Agent": "ShortsBot/1.0 (educational project; python-requests)"}
 
 
 def load_config() -> dict:
@@ -58,7 +59,7 @@ def append_done(page_id: str, title: str):
 def fetch_wiki_summary(title: str) -> dict | None:
     encoded = requests.utils.quote(title.replace(" ", "_"))
     try:
-        resp = requests.get(f"{WIKI_REST}/{encoded}", timeout=15)
+        resp = requests.get(f"{WIKI_REST}/{encoded}", headers=HEADERS, timeout=15)
         if resp.status_code == 404:
             return None
         resp.raise_for_status()
@@ -78,7 +79,7 @@ def fetch_full_content(page_id: str) -> str:
         "format": "json",
     }
     try:
-        resp = requests.get(WIKI_API, params=params, timeout=20)
+        resp = requests.get(WIKI_API, params=params, headers=HEADERS, timeout=20)
         resp.raise_for_status()
         data = resp.json()
         page = data["query"]["pages"].get(page_id, {})
@@ -93,7 +94,6 @@ def fetch_sources(n: int, log=print) -> int:
     queue에서 n개 꺼내 Wikipedia 수집 후 sources.jsonl 저장.
     반환값: 성공적으로 저장된 수
     """
-    sys.path.insert(0, str(ROOT))
     from storage import source_exists, add_source
     from crawler.build_queue import build_queue
 
