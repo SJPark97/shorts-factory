@@ -542,6 +542,7 @@ class App(tk.Tk):
         self.geometry("760x600")
         self.resizable(True, True)
         self._running = False
+        self._stop_event = threading.Event()
         self._build_ui()
         # 시작 시 설정 검증 (백그라운드)
         threading.Thread(target=self._startup_validation, daemon=True).start()
@@ -553,12 +554,26 @@ class App(tk.Tk):
         top = tk.Frame(self, pady=6)
         top.pack(fill="x", padx=10)
 
+        self._btn_area = tk.Frame(top)
+        self._btn_area.pack(side="left")
+
         self._run_btn = tk.Button(
-            top, text="▶  파이프라인 실행", width=18,
+            self._btn_area, text="▶  파이프라인 실행", width=18,
             bg="#2ecc71", fg="white", font=("", 11, "bold"),
             command=self._run_pipeline,
         )
         self._run_btn.pack(side="left")
+
+        self._stop_btn = tk.Button(
+            self._btn_area, text="■  중지", width=8,
+            bg="#e67e22", fg="white", font=("", 11, "bold"),
+            command=self._stop_pipeline,
+        )
+        self._quit_btn = tk.Button(
+            self._btn_area, text="✕  종료", width=8,
+            bg="#e74c3c", fg="white", font=("", 11, "bold"),
+            command=self.destroy,
+        )
 
         tk.Button(top, text="⚙  설정", width=8,
                   command=lambda: SettingsWindow(self),
@@ -773,10 +788,21 @@ class App(tk.Tk):
         self._log.delete("1.0", "end")
         self._log.config(state="disabled")
 
+    def _stop_pipeline(self):
+        self._stop_event.set()
+        self.after(0, lambda: self._stop_btn.config(text="중지 중...", state="disabled"))
+
     def _set_running(self, running: bool):
         self._running = running
-        state = "disabled" if running else "normal"
-        self._run_btn.config(state=state)
+        if running:
+            self._run_btn.pack_forget()
+            self._stop_btn.config(text="■  중지", state="normal")
+            self._stop_btn.pack(side="left")
+            self._quit_btn.pack(side="left", padx=(4, 0))
+        else:
+            self._stop_btn.pack_forget()
+            self._quit_btn.pack_forget()
+            self._run_btn.pack(side="left")
         status = "실행 중..." if running else "완료"
         color = "orange" if running else "green"
         self.after(0, lambda: self._status_lbl.config(text=status, fg=color))
@@ -807,22 +833,77 @@ class App(tk.Tk):
             ):
                 return
 
+        self._stop_event.clear()
         self._set_running(True)
         thread = threading.Thread(target=self._pipeline_thread, daemon=True)
         thread.start()
 
     def _pipeline_thread(self):
         try:
-            from main import run_pipeline
-            run_pipeline(log=self.log)
+            from crawler.fetcher import fetch_sources
+            from script.generator import generate_scripts
+            from video.tts import run_tts_batch
+            from video.kling import run_kling_batch
+            from video.composer import run_compose_batch
+            from uploader.youtube import run_upload_batch
+
+            cfg = load_config()
+            n = cfg["upload"].get("daily_upload_limit", 3)
+            channels = cfg.get("channels", [])
+            active_channels = [c for c in channels if c.get("active", True)]
+            if not active_channels:
+                active_channels = [{"id": "default", "style": "default"}]
+
+            def stopped():
+                if self._stop_event.is_set():
+                    self.log("[중지] 파이프라인이 중지되었습니다.", "warn")
+                    return True
+                return False
+
+            # Phase 1
+            self.log("[Phase 1] Wikipedia 소스 수집")
+            fetched = fetch_sources(n=n, log=self.log)
+            if stopped(): return
+
+            # Phase 2
+            self.log("[Phase 2] 대본 생성")
+            total_scripts = 0
+            for ch in active_channels:
+                if stopped(): return
+                total_scripts += generate_scripts(
+                    n=n, channel_id=ch.get("id", "default"),
+                    style=ch.get("style", "default"), log=self.log)
+
+            if stopped(): return
+
+            # Phase 3-1
+            self.log("[Phase 3-1] TTS 변환")
+            tts_done = run_tts_batch(n=total_scripts or n, log=self.log)
+            if stopped(): return
+
+            # Phase 3-2
+            self.log("[Phase 3-2] Kling 영상 생성")
+            kling_done = run_kling_batch(n=tts_done or n, log=self.log)
+            if stopped(): return
+
+            # Phase 3-3
+            self.log("[Phase 3-3] FFmpeg 합성")
+            composed = run_compose_batch(n=kling_done or n, log=self.log)
+            if stopped(): return
+
+            # Phase 4
+            self.log("[Phase 4] YouTube 업로드")
+            uploaded = run_upload_batch(n=composed or n, log=self.log)
+
             self.after(0, lambda: messagebox.showinfo(
                 "완료", "파이프라인 실행이 완료되었습니다."
             ))
         except Exception as e:
-            self.log(f"[오류] {e}")
+            self.log(f"[오류] {e}", "err")
             self.after(0, lambda: messagebox.showerror("오류", str(e)))
         finally:
-            self._set_running(False)
+            self._stop_event.clear()
+            self.after(0, lambda: self._set_running(False))
 
 
 def main():
