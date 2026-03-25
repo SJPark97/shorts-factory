@@ -531,6 +531,8 @@ class SettingsWindow(tk.Toplevel):
         save_config(cfg)
         messagebox.showinfo("저장 완료", "설정이 저장되었습니다.")
         self.destroy()
+        # 저장 후 메인 앱에서 재검증
+        threading.Thread(target=self.master._run_validation, daemon=True).start()
 
 
 # ─── 메인 앱 ──────────────────────────────────────────────────────
@@ -724,64 +726,156 @@ class App(tk.Tk):
                             command=lambda c=ch_id, p=cred: self._do_auth(c, p))
             btn.pack(side="left")
 
-    # ── 시작 시 전체 설정 검증 ─────────────────────────────────────
-    def _startup_validation(self):
-        import time
-        time.sleep(0.3)  # UI 렌더링 대기
+    # ── API 연결 테스트 ────────────────────────────────────────────
+    def _test_kling(self, api_key: str, api_secret: str) -> str | None:
+        try:
+            from video.kling import _make_jwt, KLING_BASE
+            import requests as _req
+            token = _make_jwt(api_key, api_secret)
+            resp = _req.get(
+                f"{KLING_BASE}/v1/videos/text2video",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=10,
+            )
+            if resp.status_code in (200, 429):  # 429 = 잔액부족이지만 인증은 성공
+                data = resp.json()
+                if data.get("code") == 1102:
+                    return "잔액 부족 (인증 성공)"
+                return None
+            return f"HTTP {resp.status_code}"
+        except Exception as e:
+            return str(e)
+
+    def _test_openai(self, api_key: str) -> str | None:
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=api_key)
+            client.models.list()
+            return None
+        except Exception as e:
+            return str(e)
+
+    def _test_claude(self, api_key: str) -> str | None:
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=api_key)
+            client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=1,
+                messages=[{"role": "user", "content": "hi"}],
+            )
+            return None
+        except Exception as e:
+            return str(e)
+
+    def _test_elevenlabs(self, api_key: str) -> str | None:
+        try:
+            from elevenlabs.client import ElevenLabs
+            ElevenLabs(api_key=api_key).voices.get_all()
+            return None
+        except Exception as e:
+            return str(e)
+
+    # ── 전체 설정 검증 ─────────────────────────────────────────────
+    def _run_validation(self):
         self.log("─" * 48, "info")
-        self.log("  시작 검증 중...", "info")
+        self.log("  API 연결 검증 중...", "info")
         self.log("─" * 48, "info")
 
         cfg = load_config()
         api = cfg.get("api", {})
         all_ok = True
 
-        # ── API 키 확인 ──────────────────────────────────────────
-        checks = [
-            ("Kling API Key",    api.get("kling_api_key", "")),
-            ("Kling API Secret", api.get("kling_api_secret", "")),
-            ("LLM API Key",      api.get("llm_api_key", "")),
-            ("TTS API Key",      api.get("tts_api_key", "")),
-        ]
-        for name, val in checks:
-            if val:
-                self.log(f"  ✓  {name}", "ok")
+        # ── Kling ────────────────────────────────────────────────
+        kling_key    = api.get("kling_api_key", "")
+        kling_secret = api.get("kling_api_secret", "")
+        if not kling_key or not kling_secret:
+            self.log("  ✗  Kling API  →  키 미설정", "err")
+            all_ok = False
+        else:
+            err = self._test_kling(kling_key, kling_secret)
+            if err is None:
+                self.log("  ✓  Kling API  →  연결 성공", "ok")
+            elif "잔액 부족" in err:
+                self.log(f"  △  Kling API  →  {err}", "warn")
             else:
-                self.log(f"  ✗  {name} 미설정  →  ⚙ 설정 > API 설정 탭에서 입력하세요", "err")
+                self.log(f"  ✗  Kling API  →  {err}", "err")
                 all_ok = False
 
-        # ── 채널 토큰 확인 ────────────────────────────────────────
+        # ── LLM ─────────────────────────────────────────────────
+        llm_provider = api.get("llm_provider", "claude")
+        llm_key      = api.get("llm_api_key", "")
+        if not llm_key:
+            self.log(f"  ✗  LLM ({llm_provider})  →  키 미설정", "err")
+            all_ok = False
+        else:
+            if llm_provider == "openai":
+                err = self._test_openai(llm_key)
+            else:
+                err = self._test_claude(llm_key)
+            if err is None:
+                self.log(f"  ✓  LLM ({llm_provider})  →  연결 성공", "ok")
+            else:
+                self.log(f"  ✗  LLM ({llm_provider})  →  {err}", "err")
+                all_ok = False
+
+        # ── TTS ─────────────────────────────────────────────────
+        tts_provider = api.get("tts_provider", "openai")
+        tts_key      = api.get("tts_api_key", "")
+        if not tts_key:
+            self.log(f"  ✗  TTS ({tts_provider})  →  키 미설정", "err")
+            all_ok = False
+        else:
+            if tts_provider == "openai":
+                # LLM과 같은 키면 재테스트 생략
+                err = None if (tts_key == llm_key and llm_provider == "openai") \
+                      else self._test_openai(tts_key)
+            elif tts_provider == "elevenlabs":
+                err = self._test_elevenlabs(tts_key)
+            else:
+                err = None
+            if err is None:
+                self.log(f"  ✓  TTS ({tts_provider})  →  연결 성공", "ok")
+            else:
+                self.log(f"  ✗  TTS ({tts_provider})  →  {err}", "err")
+                all_ok = False
+
+        # ── YouTube 채널 ─────────────────────────────────────────
         from uploader.youtube import check_token
         channels = cfg.get("channels", [])
         if not channels:
-            self.log("  ✗  등록된 YouTube 채널 없음  →  위 채널 패널에서 추가하세요", "err")
+            self.log("  ✗  YouTube 채널  →  등록된 채널 없음", "err")
             all_ok = False
         else:
             for ch in channels:
                 ch_id  = ch.get("id", "")
                 active = ch.get("active", True)
                 if not active:
-                    self.log(f"  -  {ch_id}  (비활성화)", "info")
+                    self.log(f"  -  YouTube [{ch_id}]  →  비활성화", "info")
                     continue
                 status = check_token(ch_id)
                 if status in ("valid", "refreshed"):
-                    self.log(f"  ✓  채널 [{ch_id}] 인증 유효", "ok")
+                    self.log(f"  ✓  YouTube [{ch_id}]  →  인증 유효", "ok")
                 elif status == "expired":
-                    self.log(f"  ✗  채널 [{ch_id}] 인증 만료  →  위 패널에서 재인증하세요", "err")
+                    self.log(f"  ✗  YouTube [{ch_id}]  →  인증 만료", "err")
                     all_ok = False
                 else:
-                    self.log(f"  ✗  채널 [{ch_id}] 인증 없음  →  위 패널에서 인증하세요", "err")
+                    self.log(f"  ✗  YouTube [{ch_id}]  →  인증 없음", "err")
                     all_ok = False
 
         self.log("─" * 48, "info")
         if all_ok:
-            self.log("  모든 설정 정상. 파이프라인을 실행할 수 있습니다.", "ok")
+            self.log("  모든 연결 정상. 파이프라인을 실행할 수 있습니다.", "ok")
         else:
             self.log("  일부 설정이 필요합니다. 위 항목을 확인하세요.", "warn")
         self.log("─" * 48, "info")
 
-        # 채널 상태 패널도 갱신
         self.after(0, self._refresh_channel_status)
+
+    def _startup_validation(self):
+        import time
+        time.sleep(0.3)  # UI 렌더링 대기
+        self._run_validation()
 
     def _clear_log(self):
         self._log.config(state="normal")
