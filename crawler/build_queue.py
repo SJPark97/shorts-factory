@@ -72,8 +72,10 @@ def get_category_members(category: str, cmtype: str = "page|subcat") -> list[dic
 
 def crawl_category(category: str, depth: int, max_depth: int,
                    done_set: set, queue_set: set,
-                   new_pages: list, log=print):
+                   new_pages: list, log=print, limit: int = 100):
     if depth > max_depth:
+        return
+    if len(new_pages) >= limit:
         return
 
     log(f"[build_queue] 탐색 중: {category} (깊이 {depth})")
@@ -84,6 +86,8 @@ def crawl_category(category: str, depth: int, max_depth: int,
         return
 
     for m in members:
+        if len(new_pages) >= limit:
+            break
         ns = m.get("ns", 0)
         page_id = str(m["pageid"]) if "pageid" in m else None
 
@@ -96,12 +100,13 @@ def crawl_category(category: str, depth: int, max_depth: int,
         elif ns == 14:  # 하위 카테고리
             subcat = m["title"].replace("Category:", "")
             crawl_category(subcat, depth + 1, max_depth,
-                           done_set, queue_set, new_pages, log)
+                           done_set, queue_set, new_pages, log, limit)
         time.sleep(0.1)
 
 
 def build_queue(categories: list[str] | None = None,
-                max_depth: int = 3,
+                max_depth: int | None = None,
+                refill_size: int | None = None,
                 log=print) -> int:
     """
     Wikipedia 카테고리 재귀 탐색 후 wiki_queue.txt 에 추가.
@@ -110,6 +115,10 @@ def build_queue(categories: list[str] | None = None,
     cfg = load_config()
     if categories is None:
         categories = cfg["crawl"].get("categories", DEFAULT_CATEGORIES)
+    if max_depth is None:
+        max_depth = cfg["crawl"].get("recursion_depth", 3)
+    if refill_size is None:
+        refill_size = cfg["crawl"].get("queue_refill_size", 100)
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -118,9 +127,12 @@ def build_queue(categories: list[str] | None = None,
     new_pages: list[str] = []
 
     for cat in categories:
+        if len(new_pages) >= refill_size:
+            break
         crawl_category(cat, depth=1, max_depth=max_depth,
                        done_set=done_set, queue_set=queue_set,
-                       new_pages=new_pages, log=log)
+                       new_pages=new_pages, log=log,
+                       limit=refill_size)
 
     if new_pages:
         with open(QUEUE_FILE, "a", encoding="utf-8") as f:

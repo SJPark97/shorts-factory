@@ -102,7 +102,9 @@ def fetch_sources(n: int, log=print) -> int:
     # queue 부족 시 자동 보충
     if queue_size() < n:
         log("[fetcher] 큐 소진 → build_queue 자동 호출")
-        build_queue(log=log)
+        max_depth = cfg["crawl"].get("recursion_depth", 3)
+        refill_size = cfg["crawl"].get("queue_refill_size", 100)
+        build_queue(max_depth=max_depth, refill_size=refill_size, log=log)
 
     items = pop_from_queue(n)
     if not items:
