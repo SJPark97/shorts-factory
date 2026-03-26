@@ -5,9 +5,8 @@ import json
 import sys
 from pathlib import Path
 
-import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from paths import CONFIG_FILE, DATA_DIR
+from paths import CONFIG_FILE, DATA_DIR, APP_DIR as ROOT
 
 TOKEN_DIR = DATA_DIR
 
@@ -190,7 +189,8 @@ def upload_video(script: dict, video_path: Path,
                 log(f"[youtube] 업로드 진행: {pct}%")
 
         video_id = response["id"]
-        update_script(script["id"], status="uploaded")
+        from storage import mark_uploaded
+        mark_uploaded(script["id"], channel_id)
         log(f"[youtube] 업로드 완료: https://youtu.be/{video_id}")
         return video_id
 
@@ -199,23 +199,17 @@ def upload_video(script: dict, video_path: Path,
         return None
 
 
-def run_upload_batch(n: int = None, log=print) -> int:
-    """video_done 스크립트 n개 업로드. 반환값: 성공 수"""
+def run_upload_batch(channel_id: str, n: int = None, log=print) -> int:
+    """특정 채널에 미사용 영상 n개 업로드. 반환값: 성공 수"""
     sys.path.insert(0, str(ROOT))
-    from storage import get_all_scripts
+    from storage import get_uploadable_scripts
     cfg = load_config()
     if n is None:
         n = cfg["upload"].get("daily_upload_limit", 3)
 
-    # 채널 목록 로드
-    channels = cfg.get("channels", [])
-    active_channels = [c for c in channels if c.get("active", True)] or [
-        {"id": "default", "style": "default"}
-    ]
-
-    ready = [s for s in get_all_scripts() if s.get("status") == "video_done"][:n]
+    ready = get_uploadable_scripts(channel_id=channel_id, limit=n)
     if not ready:
-        log("[youtube] 업로드할 영상 없음")
+        log(f"[youtube] [{channel_id}] 업로드할 영상 없음")
         return 0
 
     done = 0
@@ -224,14 +218,11 @@ def run_upload_batch(n: int = None, log=print) -> int:
         if not video_path or not video_path.exists():
             log(f"[youtube] 영상 파일 없음, 스킵: script_id={script['id']}")
             continue
-
-        # 채널이 여럿이면 채널 ID 기반으로 맞는 채널 선택
-        channel_id = script.get("channel_id", "default")
         result = upload_video(script, video_path, channel_id=channel_id, log=log)
         if result:
             done += 1
 
-    log(f"[youtube] {done}/{len(ready)}개 업로드 완료")
+    log(f"[youtube] [{channel_id}] {done}/{len(ready)}개 업로드 완료")
     return done
 
 

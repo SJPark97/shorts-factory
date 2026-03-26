@@ -246,16 +246,11 @@ class SettingsWindow(tk.Toplevel):
         input_frame.pack(fill="x", padx=10, pady=4)
 
         self._ch_id_var = tk.StringVar()
-        self._ch_style_var = tk.StringVar(value="default")
         self._ch_active_var = tk.BooleanVar(value=True)
 
         tk.Label(input_frame, text="채널ID").pack(side="left")
         tk.Entry(input_frame, textvariable=self._ch_id_var, width=18
                  ).pack(side="left", padx=4)
-        tk.Label(input_frame, text="스타일").pack(side="left")
-        ttk.Combobox(input_frame, textvariable=self._ch_style_var,
-                     values=["default", "dramatic", "quiz", "timeline"],
-                     width=10, state="readonly").pack(side="left", padx=4)
         tk.Checkbutton(input_frame, text="활성화", variable=self._ch_active_var
                        ).pack(side="left")
         tk.Button(input_frame, text="+ 추가", command=self._add_channel
@@ -268,20 +263,15 @@ class SettingsWindow(tk.Toplevel):
         container = tk.Frame(self._ch_rows_frame, bd=1, relief="groove")
         container.pack(fill="x", pady=3, padx=2)
 
-        # ── 1줄: 채널ID / 스타일 / 활성화 / 삭제 ──────────────────
+        # ── 1줄: 채널ID / 활성화 / 삭제 ───────────────────────────
         line1 = tk.Frame(container)
         line1.pack(fill="x", padx=4, pady=(4, 1))
 
-        id_var    = tk.StringVar(value=ch_id)
-        style_var = tk.StringVar(value=style)
+        id_var     = tk.StringVar(value=ch_id)
         active_var = tk.BooleanVar(value=active)
 
         tk.Label(line1, text="채널ID", width=6, anchor="w").pack(side="left")
         tk.Entry(line1, textvariable=id_var, width=20).pack(side="left", padx=2)
-        tk.Label(line1, text="스타일", width=6, anchor="w").pack(side="left", padx=(8, 0))
-        ttk.Combobox(line1, textvariable=style_var,
-                     values=["default", "dramatic", "quiz", "timeline"],
-                     width=10, state="readonly").pack(side="left", padx=2)
         tk.Checkbutton(line1, text="활성화", variable=active_var).pack(side="left", padx=6)
         tk.Button(line1, text="✕", width=2, fg="red",
                   command=lambda c=container: self._remove_channel_row(c)
@@ -312,7 +302,7 @@ class SettingsWindow(tk.Toplevel):
                              bg="#e0e0e0", fg="black")
         auth_btn.pack(side="left", padx=4)
 
-        row = {"container": container, "id": id_var, "style": style_var,
+        row = {"container": container, "id": id_var,
                "active": active_var, "cred": cred_var, "auth_btn": auth_btn}
         self._channel_rows.append(row)
         auth_btn.config(command=lambda r=row: self._auth_channel_row(r))
@@ -356,7 +346,7 @@ class SettingsWindow(tk.Toplevel):
         if not ch_id:
             messagebox.showwarning("입력 오류", "채널 ID를 입력하세요.")
             return
-        self._append_channel_row(ch_id, self._ch_style_var.get(), self._ch_active_var.get())
+        self._append_channel_row(ch_id, "default", self._ch_active_var.get())
         self._ch_id_var.set("")
 
     def _auth_channel_row(self, row: dict):
@@ -522,7 +512,6 @@ class SettingsWindow(tk.Toplevel):
             if ch_id:
                 channels.append({
                     "id": ch_id,
-                    "style": row["style"].get(),
                     "active": row["active"].get(),
                     "credentials_path": row["cred"].get().strip(),
                 })
@@ -550,8 +539,6 @@ class App(tk.Tk):
         threading.Thread(target=self._startup_validation, daemon=True).start()
 
     def _build_ui(self):
-        from tkinter import filedialog
-
         # ── 상단 버튼 바 ───────────────────────────────────────────
         top = tk.Frame(self, pady=6)
         top.pack(fill="x", padx=10)
@@ -559,8 +546,14 @@ class App(tk.Tk):
         self._btn_area = tk.Frame(top)
         self._btn_area.pack(side="left")
 
+        # 영상 수 지정 스핀박스
+        tk.Label(self._btn_area, text="영상 수:").pack(side="left")
+        self._make_n_var = tk.IntVar(value=3)
+        tk.Spinbox(self._btn_area, from_=1, to=30, width=4,
+                   textvariable=self._make_n_var).pack(side="left", padx=(2, 6))
+
         self._run_btn = tk.Button(
-            self._btn_area, text="▶  파이프라인 실행", width=18,
+            self._btn_area, text="▶  영상 제작", width=14,
             bg="#2ecc71", fg="white", font=("", 11, "bold"),
             command=self._run_pipeline,
         )
@@ -680,8 +673,7 @@ class App(tk.Tk):
                     if cred:
                         existing["credentials_path"] = cred
                 else:
-                    channels.append({"id": ch_id, "style": "default",
-                                     "active": True, "credentials_path": cred})
+                    channels.append({"id": ch_id, "active": True, "credentials_path": cred})
                 cfg["channels"] = channels
                 save_config(cfg)
 
@@ -721,10 +713,24 @@ class App(tk.Tk):
                                 font=("", 10, "bold"), width=24, anchor="w")
             icon_lbl.pack(side="left", padx=(2, 8))
 
-            btn_text = "✓ 인증됨" if ok else "재인증"
-            btn = tk.Button(row_fr, text=btn_text, width=10,
-                            command=lambda c=ch_id, p=cred: self._do_auth(c, p))
-            btn.pack(side="left")
+            auth_text = "✓ 인증됨" if ok else "재인증"
+            tk.Button(row_fr, text=auth_text, width=10,
+                      command=lambda c=ch_id, p=cred: self._do_auth(c, p)
+                      ).pack(side="left")
+
+            upload_btn = tk.Button(
+                row_fr, text="▶ 업로드", width=10,
+                bg="#3498db", fg="white",
+                state="normal" if ok else "disabled",
+                command=lambda c=ch_id: self._upload_channel(c),
+            )
+            upload_btn.pack(side="left", padx=(6, 0))
+
+            # 업로드 가능한 영상 수 표시
+            from storage import get_uploadable_scripts
+            avail = len(get_uploadable_scripts(ch_id, limit=100))
+            tk.Label(row_fr, text=f"(대기 {avail}개)", fg="gray", font=("", 9)
+                     ).pack(side="left", padx=4)
 
     # ── API 연결 테스트 ────────────────────────────────────────────
     def _test_kling(self, api_key: str, api_secret: str) -> str | None:
@@ -904,29 +910,6 @@ class App(tk.Tk):
     def _run_pipeline(self):
         if self._running:
             return
-
-        # 파이프라인 실행 전 활성 채널 토큰 사전 검증
-        cfg = load_config()
-        channels = [c for c in cfg.get("channels", []) if c.get("active", True)]
-        if not channels:
-            channels = [{"id": "default"}]
-
-        from uploader.youtube import check_token
-        invalid = []
-        for ch in channels:
-            status = check_token(ch["id"])
-            if status in ("expired", "missing"):
-                invalid.append(ch["id"])
-
-        if invalid:
-            names = ", ".join(invalid)
-            if not messagebox.askyesno(
-                "인증 필요",
-                f"다음 채널의 인증이 만료되었거나 없습니다:\n{names}\n\n"
-                "그래도 실행할까요? (업로드 단계에서 실패할 수 있습니다)"
-            ):
-                return
-
         self._stop_event.clear()
         self._set_running(True)
         thread = threading.Thread(target=self._pipeline_thread, daemon=True)
@@ -939,14 +922,8 @@ class App(tk.Tk):
             from video.tts import run_tts_batch
             from video.kling import run_kling_batch
             from video.composer import run_compose_batch
-            from uploader.youtube import run_upload_batch
 
-            cfg = load_config()
-            n = cfg["upload"].get("daily_upload_limit", 3)
-            channels = cfg.get("channels", [])
-            active_channels = [c for c in channels if c.get("active", True)]
-            if not active_channels:
-                active_channels = [{"id": "default", "style": "default"}]
+            n = self._make_n_var.get()
 
             def stopped():
                 if self._stop_event.is_set():
@@ -961,13 +938,7 @@ class App(tk.Tk):
 
             # Phase 2
             self.log("[Phase 2] 대본 생성")
-            total_scripts = 0
-            for ch in active_channels:
-                if stopped(): return
-                total_scripts += generate_scripts(
-                    n=n, channel_id=ch.get("id", "default"),
-                    style=ch.get("style", "default"), log=self.log)
-
+            total_scripts = generate_scripts(n=n, log=self.log)
             if stopped(): return
 
             # Phase 3-1
@@ -983,21 +954,44 @@ class App(tk.Tk):
             # Phase 3-3
             self.log("[Phase 3-3] FFmpeg 합성")
             composed = run_compose_batch(n=kling_done or n, log=self.log)
-            if stopped(): return
 
-            # Phase 4
-            self.log("[Phase 4] YouTube 업로드")
-            uploaded = run_upload_batch(n=composed or n, log=self.log)
-
-            self.after(0, lambda: messagebox.showinfo(
-                "완료", "파이프라인 실행이 완료되었습니다."
+            self.after(0, lambda c=composed: messagebox.showinfo(
+                "완료", f"영상 제작 완료: {c}개\n채널 패널에서 업로드하세요."
             ))
+            self.after(0, self._refresh_channel_status)
         except Exception as e:
             self.log(f"[오류] {e}", "err")
             self.after(0, lambda: messagebox.showerror("오류", str(e)))
         finally:
             self._stop_event.clear()
             self.after(0, lambda: self._set_running(False))
+
+    def _upload_channel(self, channel_id: str):
+        """특정 채널에 미사용 영상 업로드 (백그라운드)"""
+        from uploader.youtube import check_token
+        status = check_token(channel_id)
+        if status not in ("valid", "refreshed"):
+            messagebox.showwarning("인증 필요", f"[{channel_id}] 채널 인증이 필요합니다.")
+            return
+
+        cfg = load_config()
+        n = cfg["upload"].get("daily_upload_limit", 3)
+
+        self.log(f"[업로드] [{channel_id}] 시작 (최대 {n}개)", "info")
+
+        def _run():
+            try:
+                from uploader.youtube import run_upload_batch
+                uploaded = run_upload_batch(channel_id=channel_id, n=n, log=self.log)
+                self.after(0, lambda u=uploaded: messagebox.showinfo(
+                    "업로드 완료", f"[{channel_id}] {u}개 업로드 완료"
+                ))
+                self.after(0, self._refresh_channel_status)
+            except Exception as e:
+                self.log(f"[업로드 오류] {e}", "err")
+                self.after(0, lambda: messagebox.showerror("업로드 오류", str(e)))
+
+        threading.Thread(target=_run, daemon=True).start()
 
 
 def main():

@@ -8,7 +8,6 @@ from pathlib import Path
 
 import requests
 
-import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from paths import APP_DIR, DATA_DIR, CONFIG_FILE as _CF
 

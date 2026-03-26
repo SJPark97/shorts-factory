@@ -101,6 +101,7 @@ def add_script(source_id: int, channel_id: str, title: str,
         "tts_path": None,
         "video_path": None,
         "status": "pending",
+        "uploaded_to": [],
         "created_at": datetime.now().isoformat(),
     }
     append_record(SCRIPTS_FILE, record)
@@ -126,7 +127,28 @@ def get_tts_ready_scripts(limit: int = 10) -> list[dict]:
 
 def get_video_ready_scripts(limit: int = 10) -> list[dict]:
     return [s for s in get_all_scripts()
-            if s.get("status") == "video_done"][:limit]
+            if s.get("status") == "video_ready"][:limit]
+
+
+def get_uploadable_scripts(channel_id: str, limit: int = 10) -> list[dict]:
+    """video_done 상태이면서 해당 채널에 아직 업로드되지 않은 스크립트"""
+    return [
+        s for s in get_all_scripts()
+        if s.get("status") == "video_done"
+        and channel_id not in s.get("uploaded_to", [])
+    ][:limit]
+
+
+def mark_uploaded(script_id: int, channel_id: str):
+    """특정 채널에 업로드 완료 표시"""
+    records = get_all_scripts()
+    for r in records:
+        if r["id"] == script_id:
+            uploaded = r.get("uploaded_to", [])
+            if channel_id not in uploaded:
+                uploaded.append(channel_id)
+            r["uploaded_to"] = uploaded
+    write_all(SCRIPTS_FILE, records)
 
 
 # ─── 내부 헬퍼 ────────────────────────────────────────────────────

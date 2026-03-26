@@ -10,7 +10,6 @@ from pathlib import Path
 
 import requests
 
-import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from paths import CONFIG_FILE, OUTPUT_DIR
 

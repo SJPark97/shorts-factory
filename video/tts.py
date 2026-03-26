@@ -5,7 +5,6 @@ import json
 import sys
 from pathlib import Path
 
-import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from paths import CONFIG_FILE, OUTPUT_DIR
 
@@ -93,7 +92,6 @@ def generate_tts(script: dict, log=print) -> Path | None:
 def run_tts_batch(n: int = None, log=print) -> int:
     """pending 스크립트 n개를 TTS 변환. 반환값: 성공 수"""
     from storage import get_pending_scripts
-    import json as _json
     cfg = load_config()
     if n is None:
         n = cfg["upload"].get("daily_upload_limit", 3)
