@@ -1,11 +1,11 @@
 {
   "api": {
-    "kling_api_key": "",
-    "kling_api_secret": "",
-    "llm_provider": "claude",
-    "llm_api_key": "",
+    "kling_api_key": "Amp3FLCm9C4MDABGmCHrfAb8PpHhtTbK",
+    "kling_api_secret": "TBk9MCBnR84ng8L9CbHhMaybkNYGmJ9M",
+    "llm_provider": "openai",
+    "llm_api_key": "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",
     "tts_provider": "openai",
-    "tts_api_key": "",
+    "tts_api_key": "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",
     "youtube_credentials_path": "data/youtube_credentials.json"
   },
   "crawl": {
@@ -19,7 +19,7 @@
     "recursion_depth": 3
   },
   "video": {
-    "target_duration_sec": 90,
+    "target_duration_sec": 30,
     "tts_voice": "alloy",
     "tts_model": "tts-1-hd",
     "elevenlabs_voice_id": "",

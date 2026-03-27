@@ -4,6 +4,8 @@ https://api.klingai.com
 """
 import hashlib
 import json
+import math
+import re
 import sys
 import time
 from pathlib import Path
@@ -128,22 +130,26 @@ def download_video(url: str, out_path: Path, log=print):
             f.write(chunk)
 
 
-def build_visual_prompt(script: dict) -> str:
-    """대본 제목 + 첫 문장으로 Kling 프롬프트 생성"""
-    title = script.get("title", "")
-    body = script.get("body", "")
-    first_sentence = body.split(".")[0] if body else ""
+def split_scenes(body: str) -> list[str]:
+    """대본 본문을 문장 단위로 분할"""
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", body) if s.strip()]
+    return sentences
+
+
+def build_scene_prompt(title: str, sentence: str) -> str:
+    """씬별 Kling 영상 프롬프트 생성"""
     return (
         f"Cinematic short video about: {title}. "
-        f"{first_sentence}. "
+        f"{sentence}. "
         "9:16 vertical format, dramatic lighting, high quality, no text overlay."
     )
 
 
-def generate_kling_video(script: dict, log=print) -> Path | None:
+def generate_kling_clips(script: dict, tts_duration: float = 0.0, log=print) -> list[Path]:
     """
-    스크립트 1개에 대해 Kling AI로 영상 생성 → 다운로드.
-    반환값: 저장된 영상 경로 (실패 시 None)
+    대본 문장별로 Kling 클립 생성.
+    - tts_duration: TTS 오디오 길이(초). 0이면 문장 수 기준으로만 생성.
+    - 반환값: 생성된 클립 경로 리스트 (1개 이상이면 storage에 저장 후 video_ready 상태로 변경)
     """
     from storage import update_script
 
@@ -151,30 +157,56 @@ def generate_kling_video(script: dict, log=print) -> Path | None:
     api_key = cfg["api"].get("kling_api_key", "")
     if not api_key:
         log("[kling] 오류: Kling API 키 미설정")
-        return None
+        return []
 
-    out_path = VIDEO_DIR / f"kling_{script['id']}.mp4"
+    clip_duration = int(cfg["video"].get("kling_duration", 5))
+    title = script.get("title", "")
+    scenes = split_scenes(script.get("body", ""))
 
-    try:
-        prompt = build_visual_prompt(script)
-        log(f"[kling] 영상 생성 요청: script_id={script['id']}")
-        task_id = create_video_task(prompt, cfg)
-        log(f"[kling] 태스크 생성됨: {task_id}")
+    if not scenes:
+        log(f"[kling] 오류: 대본 본문이 비어 있음 (script_id={script['id']})")
+        return []
 
-        video_url = poll_task(task_id, cfg, log=log)
-        download_video(video_url, out_path, log=log)
+    # TTS 길이 기준으로 필요한 클립 수 계산 (최소 문장 수만큼은 생성)
+    if tts_duration > 0:
+        needed = math.ceil(tts_duration / clip_duration)
+        # 문장을 순환하며 needed개 채우기
+        scene_list = [scenes[i % len(scenes)] for i in range(needed)]
+    else:
+        scene_list = scenes
 
-        update_script(script["id"], video_path=str(out_path), status="video_ready")
-        log(f"[kling] 완료: {out_path}")
-        return out_path
+    VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+    clip_paths: list[Path] = []
 
-    except Exception as e:
-        log(f"[kling] 오류 (script_id={script['id']}): {e}")
-        return None
+    for i, sentence in enumerate(scene_list):
+        out_path = VIDEO_DIR / f"kling_{script['id']}_clip{i}.mp4"
+        prompt = build_scene_prompt(title, sentence)
+        log(f"[kling] 클립 {i + 1}/{len(scene_list)} 생성 요청")
+        try:
+            task_id = create_video_task(prompt, cfg)
+            log(f"[kling] 태스크 생성됨: {task_id}")
+            video_url = poll_task(task_id, cfg, timeout=600, log=log)
+            download_video(video_url, out_path, log=log)
+            clip_paths.append(out_path)
+            log(f"[kling] 클립 {i + 1} 완료: {out_path.name}")
+        except Exception as e:
+            log(f"[kling] 클립 {i + 1} 오류: {e}")
+
+    if clip_paths:
+        update_script(
+            script["id"],
+            clip_paths=[str(p) for p in clip_paths],
+            status="video_ready",
+        )
+        log(f"[kling] {len(clip_paths)}/{len(scene_list)}개 클립 생성 완료")
+    else:
+        log(f"[kling] 오류: 생성된 클립 없음 (script_id={script['id']})")
+
+    return clip_paths
 
 
 def run_kling_batch(n: int = None, log=print) -> int:
-    """tts_done 스크립트 n개에 대해 Kling 영상 생성. 반환값: 성공 수"""
+    """tts_done 스크립트 n개에 대해 Kling 클립 생성. 반환값: 성공 스크립트 수"""
     from storage import get_tts_ready_scripts
     cfg = load_config()
     if n is None:
@@ -183,8 +215,8 @@ def run_kling_batch(n: int = None, log=print) -> int:
     if not scripts:
         log("[kling] 처리할 스크립트 없음")
         return 0
-    done = sum(1 for s in scripts if generate_kling_video(s, log=log) is not None)
-    log(f"[kling] {done}/{len(scripts)}개 영상 생성 완료")
+    done = sum(1 for s in scripts if generate_kling_clips(s, log=log))
+    log(f"[kling] {done}/{len(scripts)}개 스크립트 클립 생성 완료")
     return done
 
 

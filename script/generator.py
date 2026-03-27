@@ -44,8 +44,8 @@ def load_config() -> dict:
 
 
 def _words_for_duration(seconds: int) -> int:
-    """평균 낭독 속도 130 단어/분 기준"""
-    return int(seconds * 130 / 60)
+    """OpenAI TTS alloy 기준 실측 낭독 속도 150 단어/분"""
+    return int(seconds * 150 / 60)
 
 
 def generate_with_claude(api_key: str, prompt: str) -> str:
@@ -125,6 +125,8 @@ def generate_scripts(n: int = None, channel_id: str = "default",
         prompt = build_prompt(source, style, duration_sec)
 
         try:
+            target_words = _words_for_duration(duration_sec)
+
             if provider == "claude":
                 raw = generate_with_claude(api_key, prompt)
             elif provider == "openai":
@@ -137,6 +139,25 @@ def generate_scripts(n: int = None, channel_id: str = "default",
             title = parsed.get("title", source["title"])
             body = parsed.get("body", "")
             hashtags = parsed.get("hashtags", [])
+
+            # 단어 수 부족 시 최대 2회 재확장 요청
+            for retry in range(2):
+                actual_words = len(body.split())
+                if actual_words >= target_words * 0.9:
+                    break
+                log(f"[generator] 단어 수 부족 ({actual_words}/{target_words}), 재확장 요청 ({retry + 1}/2)")
+                expand_prompt = (
+                    f"The following narration script is too short ({actual_words} words). "
+                    f"Please expand it to exactly {target_words} words while keeping the same "
+                    f"topic, tone, and style. Add more fascinating details, examples, or context.\n\n"
+                    f"Current body:\n{body}\n\n"
+                    f"Output ONLY the expanded body text, no JSON, no extra commentary."
+                )
+                if provider == "claude":
+                    body = generate_with_claude(api_key, expand_prompt).strip()
+                else:
+                    body = generate_with_openai(api_key, expand_prompt).strip()
+                log(f"[generator] 재확장 완료: {len(body.split())}단어")
 
             if not body:
                 log(f"[generator] 빈 대본 생성됨, 스킵: {source['title']}")
