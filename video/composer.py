@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from paths import CONFIG_FILE, OUTPUT_DIR
+from paths import CONFIG_FILE, OUTPUT_DIR, FINISHED_DIR
 
 SUBTITLE_DIR = OUTPUT_DIR / "subtitles"
 OUTPUT_DIR = OUTPUT_DIR / "video"
@@ -231,8 +231,21 @@ def compose(script: dict, log=print) -> Path | None:
             audio_duration=duration, clip_duration=clip_duration, log=log,
         )
 
-        update_script(script["id"], video_path=str(out_path), status="video_done")
-        return out_path
+        # 최종 영상을 finished/ 로 이동
+        FINISHED_DIR.mkdir(parents=True, exist_ok=True)
+        final_path = FINISHED_DIR / out_path.name
+        out_path.rename(final_path)
+
+        # 중간 파일(TTS, 클립) 삭제
+        if audio_path.exists():
+            audio_path.unlink()
+        for cp in clip_paths:
+            if cp.exists():
+                cp.unlink()
+
+        update_script(script["id"], video_path=str(final_path), status="video_done")
+        log(f"[composer] 중간 파일 정리 완료 → {final_path}")
+        return final_path
 
     except Exception as e:
         log(f"[composer] 오류 (script_id={script['id']}): {e}")

@@ -29,6 +29,7 @@ APP_DIR = get_app_dir()
 CONFIG_FILE = APP_DIR / "config.json"
 DATA_DIR = APP_DIR / "data"
 OUTPUT_DIR = APP_DIR / "output"
+FINISHED_DIR = APP_DIR / "finished"
 
 
 def ensure_user_files():
@@ -39,6 +40,7 @@ def ensure_user_files():
     (OUTPUT_DIR / "audio").mkdir(parents=True, exist_ok=True)
     (OUTPUT_DIR / "video").mkdir(parents=True, exist_ok=True)
     (OUTPUT_DIR / "subtitles").mkdir(parents=True, exist_ok=True)
+    FINISHED_DIR.mkdir(parents=True, exist_ok=True)
 
     if not CONFIG_FILE.exists():
         template = get_resource_dir() / "config.json"

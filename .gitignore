@@ -13,6 +13,7 @@ config.json
 # 데이터 및 결과물
 data/
 output/
+finished/
 assets/
 
 # macOS
