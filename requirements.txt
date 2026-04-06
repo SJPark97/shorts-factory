@@ -23,5 +23,8 @@ google-auth-oauthlib==1.2.1
 # GUI (tkinter is built-in on Windows)
 # No extra deps needed for Tkinter
 
+# Audio
+mutagen==1.47.0
+
 # Utilities
 tqdm==4.67.1

@@ -57,8 +57,8 @@ def _headers(cfg: dict) -> dict:
     }
 
 
-def create_video_task(prompt: str, cfg: dict) -> str | None:
-    """Kling AI 영상 생성 태스크 생성. 반환값: task_id"""
+def create_video_task(prompt: str, cfg: dict, log=print) -> str | None:
+    """Kling AI 영상 생성 태스크 생성. 반환값: task_id (429 시 backoff 재시도)"""
     model = cfg["video"].get("kling_model", "kling-v1")
     aspect_ratio = cfg["video"].get("kling_aspect_ratio", "9:16")
     duration = cfg["video"].get("kling_duration", 5)
@@ -72,13 +72,24 @@ def create_video_task(prompt: str, cfg: dict) -> str | None:
         "mode": "std",
     }
 
-    resp = requests.post(
-        f"{KLING_BASE}/v1/videos/text2video",
-        headers=_headers(cfg),
-        json=payload,
-        timeout=30,
-    )
-    resp.raise_for_status()
+    backoff = 30
+    for attempt in range(5):
+        resp = requests.post(
+            f"{KLING_BASE}/v1/videos/text2video",
+            headers=_headers(cfg),
+            json=payload,
+            timeout=30,
+        )
+        if resp.status_code == 429:
+            log(f"[kling] 429 rate limit, {backoff}초 후 재시도 ({attempt + 1}/5)")
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 300)
+            continue
+        resp.raise_for_status()
+        break
+    else:
+        raise RuntimeError("Kling API 429: rate limit 초과, 재시도 실패")
+
     data = resp.json()
 
     if data.get("code") != 0:
@@ -145,21 +156,40 @@ def build_scene_prompt(title: str, sentence: str) -> str:
     )
 
 
+def check_task(task_id: str, cfg: dict) -> tuple[str, str | None]:
+    """태스크 상태 단건 조회. 반환값: (status, video_url or None)"""
+    resp = requests.get(
+        f"{KLING_BASE}/v1/videos/text2video/{task_id}",
+        headers=_headers(cfg),
+        timeout=15,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    if data.get("code") != 0:
+        raise RuntimeError(f"Kling 폴링 오류: {data.get('message')}")
+    status = data["data"]["task_status"]
+    if status == "succeed":
+        videos = data["data"].get("task_result", {}).get("videos", [])
+        return status, videos[0]["url"] if videos else None
+    return status, None
+
+
 def generate_kling_clips(script: dict, tts_duration: float = 0.0, log=print) -> list[Path]:
     """
-    대본 문장별로 Kling 클립 생성.
-    - tts_duration: TTS 오디오 길이(초). 0이면 문장 수 기준으로만 생성.
-    - 반환값: 생성된 클립 경로 리스트 (1개 이상이면 storage에 저장 후 video_ready 상태로 변경)
+    슬라이딩 윈도우 방식으로 Kling 클립 생성.
+    - max_concurrent개까지 동시 제출, 1개 완료되면 1개 추가 제출.
+    - tts_duration 기준으로 필요한 클립 수 계산.
     """
     from storage import update_script
 
     cfg = load_config()
-    api_key = cfg["api"].get("kling_api_key", "")
-    if not api_key:
+    if not cfg["api"].get("kling_api_key", ""):
         log("[kling] 오류: Kling API 키 미설정")
         return []
 
     clip_duration = int(cfg["video"].get("kling_duration", 5))
+    max_concurrent = int(cfg["video"].get("kling_max_concurrent", 3))
+    poll_interval = int(cfg["video"].get("kling_poll_interval", 15))
     title = script.get("title", "")
     scenes = split_scenes(script.get("body", ""))
 
@@ -167,42 +197,92 @@ def generate_kling_clips(script: dict, tts_duration: float = 0.0, log=print) -> 
         log(f"[kling] 오류: 대본 본문이 비어 있음 (script_id={script['id']})")
         return []
 
-    # TTS 길이 기준으로 필요한 클립 수 계산 (최소 문장 수만큼은 생성)
     if tts_duration > 0:
         needed = math.ceil(tts_duration / clip_duration)
-        # 문장을 순환하며 needed개 채우기
         scene_list = [scenes[i % len(scenes)] for i in range(needed)]
     else:
         scene_list = scenes
 
     VIDEO_DIR.mkdir(parents=True, exist_ok=True)
-    clip_paths: list[Path] = []
+    total = len(scene_list)
+    log(f"[kling] 총 {total}개 클립 필요 (TTS {tts_duration:.1f}초 / 클립 {clip_duration}초)")
 
-    for i, sentence in enumerate(scene_list):
-        out_path = VIDEO_DIR / f"kling_{script['id']}_clip{i}.mp4"
-        prompt = build_scene_prompt(title, sentence)
-        log(f"[kling] 클립 {i + 1}/{len(scene_list)} 생성 요청")
-        try:
-            task_id = create_video_task(prompt, cfg)
-            log(f"[kling] 태스크 생성됨: {task_id}")
-            video_url = poll_task(task_id, cfg, timeout=600, log=log)
-            download_video(video_url, out_path, log=log)
-            clip_paths.append(out_path)
-            log(f"[kling] 클립 {i + 1} 완료: {out_path.name}")
-        except Exception as e:
-            log(f"[kling] 클립 {i + 1} 오류: {e}")
+    # work_queue: 아직 제출 안 한 (index, sentence) 목록
+    work_queue = list(enumerate(scene_list))
+    # pending: {task_id: (index, out_path)}
+    pending: dict[str, tuple[int, Path]] = {}
+    clip_paths: dict[int, Path] = {}
 
-    if clip_paths:
+    def submit_up_to_limit():
+        while work_queue and len(pending) < max_concurrent:
+            i, sentence = work_queue.pop(0)
+            out_path = VIDEO_DIR / f"kling_{script['id']}_clip{i}.mp4"
+            prompt = build_scene_prompt(title, sentence)
+            try:
+                task_id = create_video_task(prompt, cfg, log=log)
+                pending[task_id] = (i, out_path)
+                log(f"[kling] 클립 {i + 1}/{total} 제출 (동시 {len(pending)}개)")
+            except Exception as e:
+                log(f"[kling] 클립 {i + 1} 제출 오류: {e}")
+
+    submit_up_to_limit()
+
+    while pending:
+        time.sleep(poll_interval)
+        completed = []
+        for task_id, (i, out_path) in list(pending.items()):
+            try:
+                status, video_url = check_task(task_id, cfg)
+                log(f"[kling] 클립 {i + 1} 상태: {status}")
+                if status == "succeed":
+                    if video_url:
+                        download_video(video_url, out_path, log=log)
+                        clip_paths[i] = out_path
+                        log(f"[kling] 클립 {i + 1} 완료: {out_path.name}")
+                    completed.append(task_id)
+                elif status == "failed":
+                    log(f"[kling] 클립 {i + 1} 실패")
+                    completed.append(task_id)
+            except Exception as e:
+                log(f"[kling] 클립 {i + 1} 폴링 오류: {e}")
+
+        for task_id in completed:
+            del pending[task_id]
+
+        if completed:
+            submit_up_to_limit()
+
+    result = [clip_paths[i] for i in sorted(clip_paths)]
+    if result:
         update_script(
             script["id"],
-            clip_paths=[str(p) for p in clip_paths],
+            clip_paths=[str(p) for p in result],
             status="video_ready",
         )
-        log(f"[kling] {len(clip_paths)}/{len(scene_list)}개 클립 생성 완료")
+        log(f"[kling] {len(result)}/{total}개 클립 생성 완료")
     else:
         log(f"[kling] 오류: 생성된 클립 없음 (script_id={script['id']})")
 
-    return clip_paths
+    return result
+
+
+def get_audio_duration(path: str) -> float:
+    """mp3/wav 파일 길이(초) 반환. 실패 시 0.0"""
+    try:
+        from mutagen.mp3 import MP3
+        return MP3(path).info.length
+    except Exception:
+        pass
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", path],
+            capture_output=True, text=True, timeout=10,
+        )
+        return float(result.stdout.strip())
+    except Exception:
+        return 0.0
 
 
 def run_kling_batch(n: int = None, log=print) -> int:
@@ -215,7 +295,13 @@ def run_kling_batch(n: int = None, log=print) -> int:
     if not scripts:
         log("[kling] 처리할 스크립트 없음")
         return 0
-    done = sum(1 for s in scripts if generate_kling_clips(s, log=log))
+    done = 0
+    for s in scripts:
+        tts_duration = get_audio_duration(s.get("tts_path", ""))
+        if tts_duration > 0:
+            log(f"[kling] TTS 길이: {tts_duration:.1f}초")
+        if generate_kling_clips(s, tts_duration=tts_duration, log=log):
+            done += 1
     log(f"[kling] {done}/{len(scripts)}개 스크립트 클립 생성 완료")
     return done
 

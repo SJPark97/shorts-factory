@@ -64,20 +64,30 @@ def run():
     print(f"[Phase 3-1] 완료: {tts_done}개 TTS 변환\n")
 
     # ── Phase 3-2: Kling 영상 생성 (mock) ─────────────────────
-    print("[Phase 3-2] Kling 영상 생성 (mock)")
+    print("[Phase 3-2] Kling 영상 생성 (mock, TTS 30초 기준)")
+    _task_counter = {"n": 0}
+
+    def fake_create_task(prompt, cfg, log=print):
+        _task_counter["n"] += 1
+        return f"mock_task_{_task_counter['n']}"
+
+    def fake_check_task(task_id, cfg):
+        return "succeed", "http://mock.url/video.mp4"
+
     def fake_download_video(url, out_path, log=print):
         make_dummy_video(out_path)
 
-    with patch("video.kling.create_video_task", return_value="mock_task_id"), \
-         patch("video.kling.poll_task", return_value="http://mock.url/video.mp4"), \
-         patch("video.kling.download_video", side_effect=fake_download_video):
+    with patch("video.kling.create_video_task", side_effect=fake_create_task), \
+         patch("video.kling.check_task", side_effect=fake_check_task), \
+         patch("video.kling.download_video", side_effect=fake_download_video), \
+         patch("video.kling.get_audio_duration", return_value=30.0):
         from video.kling import run_kling_batch
         kling_done = run_kling_batch(n=tts_done or 1, log=print)
     print(f"[Phase 3-2] 완료: {kling_done}개 영상 생성\n")
 
     # ── Phase 3-3: FFmpeg 합성 (mock) ─────────────────────────
     print("[Phase 3-3] FFmpeg 합성 (mock)")
-    def fake_compose_video(video_path, audio_path, srt_path, out_path, log=print):
+    def fake_compose_video(video_path, audio_path, srt_path, out_path, log=print, **kwargs):
         make_dummy_video(out_path)
 
     with patch("video.composer.compose_video", side_effect=fake_compose_video), \
